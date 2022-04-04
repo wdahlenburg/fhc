@@ -96,7 +96,28 @@ pub async fn return_http_data(
 pub fn return_http_client(timeout: u64, max_redirects: usize) -> Client {
     reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(timeout))
-        .redirect(Policy::limited(max_redirects))
+        .redirect(Policy::custom(move |attempt| {
+            let prev_host = match attempt.previous().last() {
+                Some(u) => u.host_str(),
+                None => None
+            };
+            let scheme = match attempt.previous().last() {
+                Some(ref u) => u.scheme(),
+                None => ""
+            };
+            if Option::is_none(&prev_host) {
+                attempt.stop()
+            } else {
+                if attempt.previous().len() > max_redirects {
+                    attempt.error("too many redirects")
+                } else if prev_host == attempt.url().host_str() && scheme != attempt.url().scheme(){
+                    // Allow redirects if the host_str is the same and the scheme changes
+                    attempt.follow()
+                } else {
+                    attempt.stop()
+                }
+            }
+        }))
         .danger_accept_invalid_certs(true)
         .trust_dns(true)
         .use_native_tls()
